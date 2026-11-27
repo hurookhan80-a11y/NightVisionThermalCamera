@@ -2,6 +2,7 @@ package com.habib.nightvisionthermal;
 
 import android.Manifest;
 import android.content.ContentValues;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -14,9 +15,19 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
+import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
+import android.media.MediaFormat;
+import android.media.MediaMuxer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.ParcelFileDescriptor;
+import android.view.MotionEvent;
+import android.view.Surface;
 import android.provider.MediaStore;
 import android.util.Range;
 import android.util.Size;
@@ -37,7 +48,9 @@ import androidx.camera.core.Camera;
 import androidx.camera.core.CameraFilter;
 import androidx.camera.core.CameraInfo;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.FocusMeteringAction;
 import androidx.camera.core.ImageAnalysis;
+import androidx.camera.core.MeteringPoint;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
@@ -51,10 +64,14 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends AppCompatActivity {
     private static final int REQ_CAMERA = 10;
@@ -95,6 +112,27 @@ public class MainActivity extends AppCompatActivity {
     private long lastProcessMs = 0;
     private final int[] eqMap = new int[256];
     private int frameCount = 0;
+    private volatile boolean stampOn = false;
+    private volatile boolean splitOn = false;
+    private boolean redUiOn = false;
+    private int strobeMode = 0;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private Runnable strobeRunnable;
+    private int sosIndex = 0;
+    private volatile float focusNormX = -1f;
+    private volatile float focusNormY = -1f;
+    private volatile long focusTimeMs = 0;
+    private volatile boolean recording = false;
+    private MediaCodec encoder;
+    private MediaMuxer muxer;
+    private Surface encoderSurface;
+    private ParcelFileDescriptor videoPfd;
+    private int videoTrack = -1;
+    private boolean muxerStarted = false;
+    private long recordStartNs = 0;
+    private int recW = 320;
+    private int recH = 240;
+    private final MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
 
     private final String[] modeNames = {
             "Normal Camera", "Night Vision", "White Phosphor NVG", "Amber NVG",
@@ -157,6 +195,35 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
+        ((Button) findViewById(R.id.recordButton)).setOnClickListener(v -> toggleRecording((Button) v));
+        ((Button) findViewById(R.id.galleryButton)).setOnClickListener(v -> openGallery());
+        ((Button) findViewById(R.id.redUiButton)).setOnClickListener(v -> {
+            redUiOn = !redUiOn;
+            findViewById(R.id.redOverlay).setVisibility(redUiOn ? View.VISIBLE : View.GONE);
+            statusText.setTextColor(redUiOn ? Color.RED : Color.WHITE);
+            ((Button) v).setText(redUiOn ? "Red UI: On" : "Red UI: Off");
+        });
+        ((Button) findViewById(R.id.strobeButton)).setOnClickListener(v -> cycleStrobe((Button) v));
+        ((Button) findViewById(R.id.stampButton)).setOnClickListener(v -> {
+            stampOn = !stampOn;
+            ((Button) v).setText(stampOn ? "Stamp: On" : "Stamp: Off");
+        });
+        ((Button) findViewById(R.id.splitButton)).setOnClickListener(v -> {
+            splitOn = !splitOn;
+            ((Button) v).setText(splitOn ? "Split: On" : "Split: Off");
+        });
+        View.OnTouchListener tapFocus = (v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_UP && v.getWidth() > 0 && v.getHeight() > 0) {
+                focusNormX = Math.max(0f, Math.min(1f, event.getX() / v.getWidth()));
+                focusNormY = Math.max(0f, Math.min(1f, event.getY() / v.getHeight()));
+                focusTimeMs = System.currentTimeMillis();
+                applyTapFocus();
+                return true;
+            }
+            return true;
+        };
+        previewView.setOnTouchListener(tapFocus);
+        processedView.setOnTouchListener(tapFocus);
         Button stack = findViewById(R.id.stackButton);
         Button enhance = findViewById(R.id.enhanceButton);
         Button edges = findViewById(R.id.edgesButton);
@@ -281,6 +348,168 @@ public class MainActivity extends AppCompatActivity {
         camera.getCameraControl().enableTorch(torchOn);
     }
 
+    private void setTorch(boolean on) {
+        try { if (camera != null && camera.getCameraInfo().hasFlashUnit()) camera.getCameraControl().enableTorch(on); } catch (Exception ignored) {}
+    }
+
+    private void cycleStrobe(Button button) {
+        if (camera == null || !camera.getCameraInfo().hasFlashUnit()) { Toast.makeText(this, "Torch not available on this camera", Toast.LENGTH_SHORT).show(); return; }
+        if (strobeRunnable != null) handler.removeCallbacks(strobeRunnable);
+        strobeMode = (strobeMode + 1) % 3;
+        sosIndex = 0;
+        if (strobeMode == 0) { setTorch(false); button.setText("Strobe: Off"); return; }
+        button.setText(strobeMode == 1 ? "Strobe: On" : "Strobe: SOS");
+        strobeRunnable = new Runnable() {
+            @Override public void run() {
+                if (strobeMode == 1) {
+                    torchOn = !torchOn;
+                    setTorch(torchOn);
+                    handler.postDelayed(this, 180);
+                } else if (strobeMode == 2) {
+                    int[] pattern = {150, 150, 150, 150, 150, 450, 450, 150, 450, 150, 450, 450, 150, 150, 150, 150, 150, 900};
+                    boolean on = sosIndex % 2 == 0;
+                    setTorch(on);
+                    int delay = pattern[sosIndex % pattern.length];
+                    sosIndex++;
+                    handler.postDelayed(this, delay);
+                }
+            }
+        };
+        handler.post(strobeRunnable);
+    }
+
+    private void applyTapFocus() {
+        if (camera == null || previewView.getWidth() == 0 || previewView.getHeight() == 0) return;
+        try {
+            MeteringPoint point = previewView.getMeteringPointFactory().createPoint(focusNormX * previewView.getWidth(), focusNormY * previewView.getHeight());
+            FocusMeteringAction action = new FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF | FocusMeteringAction.FLAG_AE)
+                    .setAutoCancelDuration(3, TimeUnit.SECONDS).build();
+            camera.getCameraControl().startFocusAndMetering(action);
+        } catch (Exception ignored) {}
+    }
+
+    private void openGallery() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*");
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(this, "Gallery open failed", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void toggleRecording(Button button) {
+        if (recording) {
+            stopRecording();
+            button.setText("Record: Off");
+            return;
+        }
+        if (mode == 0) { Toast.makeText(this, "Video recording works in processed modes", Toast.LENGTH_SHORT).show(); return; }
+        int w = lastBitmap != null ? lastBitmap.getWidth() : 320;
+        int h = lastBitmap != null ? lastBitmap.getHeight() : 240;
+        if (startRecording(w, h)) button.setText("Record: On");
+    }
+
+    private boolean startRecording(int width, int height) {
+        try {
+            recW = Math.max(160, width - (width % 2));
+            recH = Math.max(120, height - (height % 2));
+            String name = "NVT_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + ".mp4";
+            if (Build.VERSION.SDK_INT >= 26) {
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.Video.Media.DISPLAY_NAME, name);
+                values.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+                values.put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/NightVisionThermal");
+                Uri uri = getContentResolver().insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values);
+                if (uri == null) throw new Exception("MediaStore insert failed");
+                videoPfd = getContentResolver().openFileDescriptor(uri, "rw");
+                muxer = new MediaMuxer(videoPfd.getFileDescriptor(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+            } else {
+                File dir = new File(getExternalFilesDir(Environment.DIRECTORY_MOVIES), "NightVisionThermal");
+                if (!dir.exists()) dir.mkdirs();
+                muxer = new MediaMuxer(new File(dir, name).getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+            }
+            MediaFormat format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, recW, recH);
+            format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+            format.setInteger(MediaFormat.KEY_BIT_RATE, Math.max(400000, recW * recH * 4));
+            format.setInteger(MediaFormat.KEY_FRAME_RATE, 15);
+            format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
+            encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
+            encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            encoderSurface = encoder.createInputSurface();
+            encoder.start();
+            videoTrack = -1;
+            muxerStarted = false;
+            recordStartNs = System.nanoTime();
+            recording = true;
+            Toast.makeText(this, "Recording started", Toast.LENGTH_SHORT).show();
+            return true;
+        } catch (Exception e) {
+            Toast.makeText(this, "Recording failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            stopRecording();
+            return false;
+        }
+    }
+
+    private void encodeFrame(Bitmap bmp) {
+        if (!recording || encoder == null || encoderSurface == null) return;
+        try {
+            Canvas canvas = encoderSurface.lockCanvas(null);
+            canvas.drawColor(Color.BLACK);
+            canvas.drawBitmap(bmp, null, new android.graphics.Rect(0, 0, recW, recH), null);
+            encoderSurface.unlockCanvasAndPost(canvas);
+            drainEncoder(false);
+        } catch (Exception ignored) {}
+    }
+
+    private void drainEncoder(boolean endOfStream) {
+        if (encoder == null) return;
+        try {
+            if (endOfStream) encoder.signalEndOfInputStream();
+            while (true) {
+                int status = encoder.dequeueOutputBuffer(bufferInfo, endOfStream ? 10000 : 0);
+                if (status == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    if (!endOfStream) break;
+                } else if (status == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    if (muxerStarted) break;
+                    videoTrack = muxer.addTrack(encoder.getOutputFormat());
+                    muxer.start();
+                    muxerStarted = true;
+                } else if (status >= 0) {
+                    java.nio.ByteBuffer data = encoder.getOutputBuffer(status);
+                    if (data != null && muxerStarted && bufferInfo.size > 0) {
+                        bufferInfo.presentationTimeUs = Math.max(0, (System.nanoTime() - recordStartNs) / 1000);
+                        data.position(bufferInfo.offset);
+                        data.limit(bufferInfo.offset + bufferInfo.size);
+                        muxer.writeSampleData(videoTrack, data, bufferInfo);
+                    }
+                    encoder.releaseOutputBuffer(status, false);
+                    if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break;
+                } else {
+                    break;
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void stopRecording() {
+        boolean wasRecording = recording;
+        recording = false;
+        try { drainEncoder(true); } catch (Exception ignored) {}
+        try { if (encoder != null) { encoder.stop(); encoder.release(); } } catch (Exception ignored) {}
+        try { if (muxer != null) { if (muxerStarted) muxer.stop(); muxer.release(); } } catch (Exception ignored) {}
+        try { if (encoderSurface != null) encoderSurface.release(); } catch (Exception ignored) {}
+        try { if (videoPfd != null) videoPfd.close(); } catch (Exception ignored) {}
+        encoder = null; muxer = null; encoderSurface = null; videoPfd = null; muxerStarted = false; videoTrack = -1;
+        if (wasRecording) Toast.makeText(this, "Video saved", Toast.LENGTH_SHORT).show();
+    }
+
+    @Override protected void onDestroy() {
+        if (strobeRunnable != null) handler.removeCallbacks(strobeRunnable);
+        stopRecording();
+        super.onDestroy();
+    }
+
     private void analyze(ImageProxy image) {
         try {
             if (mode == 0 || frozen) return;
@@ -306,7 +535,7 @@ public class MainActivity extends AppCompatActivity {
             int startY = (height - effH) / 2;
             int targetW = quality == 0 ? 240 : quality == 1 ? 320 : 360;
             int step = Math.max(1, effW / targetW);
-            boolean needRgb = mode == 4 || mode == 12 || mode == 13 || mode == 14;
+            boolean needRgb = mode == 4 || mode == 12 || mode == 13 || mode == 14 || splitOn;
             int outW = effW / step;
             int outH = effH / step;
             int n = outW * outH;
@@ -370,6 +599,7 @@ public class MainActivity extends AppCompatActivity {
                         int e = edgeValue(lum, outW, outH, x, y);
                         if (e > 70) px = Color.rgb(20, 20, 20);
                     }
+                    if (splitOn && x >= outW / 2) px = Color.rgb(rr[i], gg[i], bb[i]);
                     pixels[i] = px;
                 }
             }
@@ -398,12 +628,25 @@ public class MainActivity extends AppCompatActivity {
                 Paint border = new Paint(); border.setColor(Color.RED); border.setStyle(Paint.Style.STROKE); border.setStrokeWidth(6f);
                 canvas.drawRect(3, 3, outW - 3, outH - 3, border);
             }
+            if (splitOn) {
+                Paint divider = new Paint(); divider.setColor(Color.WHITE); divider.setStrokeWidth(3f);
+                canvas.drawLine(outW / 2f, 0, outW / 2f, outH, divider);
+            }
+            if (focusNormX >= 0 && nowMs - focusTimeMs < 1200) {
+                Paint ring = new Paint(); ring.setColor(Color.YELLOW); ring.setStyle(Paint.Style.STROKE); ring.setStrokeWidth(4f);
+                canvas.drawCircle(focusNormX * outW, focusNormY * outH, Math.max(14f, outW / 18f), ring);
+            }
+            if (stampOn) {
+                Paint stamp = new Paint(); stamp.setColor(Color.WHITE); stamp.setTextSize(Math.max(13f, outW / 22f)); stamp.setShadowLayer(3f, 1f, 1f, Color.BLACK);
+                canvas.drawText(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date()), 8, outH - 8, stamp);
+            }
             int rotation = image.getImageInfo().getRotationDegrees();
             if (rotation != 0) {
                 Matrix m = new Matrix(); m.postRotate(rotation);
                 bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
             }
             Bitmap finalBmp = bmp;
+            if (recording) encodeFrame(finalBmp);
             if (motionAlert && motionPhoto && nowMs - lastMotionCaptureMs > 3000) {
                 lastMotionCaptureMs = nowMs;
                 saveBitmap(finalBmp);
