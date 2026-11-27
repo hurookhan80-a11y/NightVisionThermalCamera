@@ -112,6 +112,7 @@ public class MainActivity extends AppCompatActivity {
     private long lastProcessMs = 0;
     private final int[] eqMap = new int[256];
     private int frameCount = 0;
+    private volatile boolean objectBoxOn = true;
     private volatile boolean stampOn = false;
     private volatile boolean splitOn = false;
     private boolean redUiOn = false;
@@ -139,7 +140,8 @@ public class MainActivity extends AppCompatActivity {
             "Low-Light Colour Boost", "Moonlight", "Thermal Style: Ironbow",
             "Thermal Style: Rainbow", "Thermal Style: Lava", "Thermal Style: Arctic",
             "Medical Thermal", "Alarm Red", "Heat Finder", "Cold Finder",
-            "IR Detector", "Motion Detector", "White Hot", "Black Hot", "Edge Detect", "Focus Peaking"
+            "IR Detector", "Motion Detector", "White Hot", "Black Hot", "Edge Detect", "Focus Peaking",
+            "Ultra Night Vision + Object + Edge"
     };
 
     @Override protected void onCreate(Bundle savedInstanceState) {
@@ -230,6 +232,10 @@ public class MainActivity extends AppCompatActivity {
         };
         previewView.setOnTouchListener(tapFocus);
         processedView.setOnTouchListener(tapFocus);
+        ((Button) findViewById(R.id.objectBoxButton)).setOnClickListener(v -> {
+            objectBoxOn = !objectBoxOn;
+            ((Button) v).setText(objectBoxOn ? "Object Box: On" : "Object Box: Off");
+        });
         Button stack = findViewById(R.id.stackButton);
         Button enhance = findViewById(R.id.enhanceButton);
         Button edges = findViewById(R.id.edgesButton);
@@ -567,7 +573,7 @@ public class MainActivity extends AppCompatActivity {
             float gain = Math.max(0.5f, gainBar.getProgress() / 100f);
             float contrast = Math.max(0.5f, contrastBar.getProgress() / 100f);
             boolean motionAlert = false;
-            if (mode == 15) {
+            if (mode == 15 || mode == 20) {
                 if (motionHeat == null || motionHeat.length != n) motionHeat = new int[n];
                 int cnt = 0;
                 if (prevLum != null && prevLum.length == n) {
@@ -594,7 +600,12 @@ public class MainActivity extends AppCompatActivity {
                     else if (mode == 13) score = coldScore(lum[i], rr[i], gg[i], bb[i]);
                     else if (mode == 14) score = irScore(lum[i], rr[i], gg[i], bb[i]);
                     if (score > markerScore) { markerScore = score; markerIdx = i; }
+                    if (mode == 20) v = clamp(Math.round(v * 1.25f));
                     int px = palette(v, y, i, lum, rr, gg, bb, gain, contrast);
+                    if (mode == 20) {
+                        int e = edgeValue(lum, outW, outH, x, y);
+                        if (e > 55) px = Color.rgb(180, 255, 255);
+                    }
                     if (edgesOn && mode >= 6 && mode <= 13) {
                         int e = edgeValue(lum, outW, outH, x, y);
                         if (e > 70) px = Color.rgb(20, 20, 20);
@@ -603,7 +614,7 @@ public class MainActivity extends AppCompatActivity {
                     pixels[i] = px;
                 }
             }
-            if (mode == 15) prevLum = lum.clone();
+            if (mode == 15 || mode == 20) prevLum = lum.clone();
             int centerVal = lum[(outH / 2) * outW + outW / 2] * 100 / 255;
             int hotVal = lum[hotIdx] * 100 / 255;
             int coldVal = lum[coldIdx] * 100 / 255;
@@ -628,6 +639,7 @@ public class MainActivity extends AppCompatActivity {
                 Paint border = new Paint(); border.setColor(Color.RED); border.setStyle(Paint.Style.STROKE); border.setStrokeWidth(6f);
                 canvas.drawRect(3, 3, outW - 3, outH - 3, border);
             }
+            if (mode == 20 && objectBoxOn) drawObjectBoxes(canvas, outW, outH);
             if (splitOn) {
                 Paint divider = new Paint(); divider.setColor(Color.WHITE); divider.setStrokeWidth(3f);
                 canvas.drawLine(outW / 2f, 0, outW / 2f, outH, divider);
@@ -738,6 +750,7 @@ public class MainActivity extends AppCompatActivity {
             }
             case 16: return Color.rgb(v, v, v);
             case 17: { int inv = 255 - v; return Color.rgb(inv, inv, inv); }
+            case 20: return Color.rgb((int)(v*0.25f), v, (int)(v*0.35f));
             case 18: return Color.rgb(0, v, (int)(v*0.35f));
             case 19: { int base = lum[i]; return v > 60 ? Color.rgb(255, 40, 40) : Color.rgb(base, base, base); }
             default: return Color.rgb(v, v, v);
@@ -789,6 +802,49 @@ public class MainActivity extends AppCompatActivity {
         Paint p = new Paint(); p.setColor(Color.argb(120, 255, 255, 255)); p.setStrokeWidth(1f);
         for (int k = 1; k < 4; k++) { canvas.drawLine(w * k / 4f, 0, w * k / 4f, h, p); canvas.drawLine(0, h * k / 4f, w, h * k / 4f, p); }
         canvas.drawCircle(w / 2f, h / 2f, 18f, p);
+    }
+
+    private void drawObjectBoxes(Canvas canvas, int w, int h) {
+        if (motionHeat == null || motionHeat.length != w * h) return;
+        int cols = 8, rows = 6;
+        boolean[] active = new boolean[cols * rows];
+        for (int cy = 0; cy < rows; cy++) {
+            for (int cx = 0; cx < cols; cx++) {
+                int x0 = cx * w / cols, x1 = (cx + 1) * w / cols;
+                int y0 = cy * h / rows, y1 = (cy + 1) * h / rows;
+                int count = 0;
+                for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) if (motionHeat[y * w + x] > 160) count++;
+                active[cy * cols + cx] = count > (x1 - x0) * (y1 - y0) / 25;
+            }
+        }
+        boolean[] seen = new boolean[cols * rows];
+        Paint box = new Paint(); box.setColor(Color.YELLOW); box.setStyle(Paint.Style.STROKE); box.setStrokeWidth(3f);
+        Paint text = new Paint(); text.setColor(Color.YELLOW); text.setTextSize(Math.max(13f, w / 24f)); text.setShadowLayer(3f, 1f, 1f, Color.BLACK);
+        int obj = 0;
+        for (int i = 0; i < active.length; i++) {
+            if (!active[i] || seen[i]) continue;
+            int minCx = cols, maxCx = -1, minCy = rows, maxCy = -1;
+            java.util.ArrayDeque<Integer> queue = new java.util.ArrayDeque<>();
+            queue.add(i); seen[i] = true;
+            while (!queue.isEmpty()) {
+                int cur = queue.poll();
+                int cx = cur % cols, cy = cur / cols;
+                minCx = Math.min(minCx, cx); maxCx = Math.max(maxCx, cx);
+                minCy = Math.min(minCy, cy); maxCy = Math.max(maxCy, cy);
+                int[][] dirs = {{1,0},{-1,0},{0,1},{0,-1}};
+                for (int[] d : dirs) {
+                    int nx = cx + d[0], ny = cy + d[1];
+                    if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+                    int ni = ny * cols + nx;
+                    if (active[ni] && !seen[ni]) { seen[ni] = true; queue.add(ni); }
+                }
+            }
+            obj++;
+            float left = minCx * w / (float) cols, top = minCy * h / (float) rows;
+            float right = (maxCx + 1) * w / (float) cols, bottom = (maxCy + 1) * h / (float) rows;
+            canvas.drawRect(left, top, right, bottom, box);
+            canvas.drawText("Object " + obj, left + 4, Math.max(16f, top - 4), text);
+        }
     }
 
     private void drawMarker(Canvas canvas, int x, int y, int color) {
