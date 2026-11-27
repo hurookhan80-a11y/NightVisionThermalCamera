@@ -23,6 +23,8 @@
                     <Button android:id="@+id/qualityButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Speed: Fast" />
                     <Button android:id="@+id/motionPhotoButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Motion Photo: Off" />
                 </LinearLayout>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Area Brightness" android:textColor="#FFFFFF" />
+                <SeekBar android:id="@+id/areaBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="200" android:progress="160" />
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Motion sensitivity" android:textColor="#FFFFFF" />
                 <SeekBar android:id="@+id/motionBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="80" android:progress="50" />
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
