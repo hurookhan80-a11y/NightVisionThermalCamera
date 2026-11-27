@@ -24,6 +24,12 @@
             <Button android:id="@+id/gridButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Grid" />
         </LinearLayout>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <Button android:id="@+id/qualityButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Speed: Fast" />
+            <Button android:id="@+id/motionPhotoButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Motion Photo: Off" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Motion sensitivity" android:textColor="#FFFFFF" />
+        <SeekBar android:id="@+id/motionBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="80" android:progress="50" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
             <Button android:id="@+id/stackButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Stack On" />
             <Button android:id="@+id/enhanceButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Enhance On" />
             <Button android:id="@+id/edgesButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Edges" />
