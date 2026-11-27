@@ -28,6 +28,6 @@ jobs:
       - name: Publish APK release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.4
-          name: Night Vision Thermal v1.4
+          tag_name: v1.5
+          name: Night Vision Thermal v1.5
           files: NightVisionThermal.apk
