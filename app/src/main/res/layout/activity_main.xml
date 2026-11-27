@@ -1,6 +1,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#000000">
     <androidx.camera.view.PreviewView android:id="@+id/previewView" android:layout_width="match_parent" android:layout_height="match_parent" />
     <ImageView android:id="@+id/processedView" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter" android:visibility="gone" />
+    <View android:id="@+id/redOverlay" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#33FF0000" android:clickable="false" android:focusable="false" android:visibility="gone" />
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="12dp" android:background="#66000000">
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Night Vision Thermal" android:textColor="#FFFFFF" android:textSize="20sp" android:textStyle="bold" />
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Thermal Style uses visible-light brightness only. Real heat detection needs an external LWIR thermal sensor." android:textColor="#D8FFD8" android:textSize="12sp" />
@@ -29,6 +30,18 @@
         </LinearLayout>
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Motion sensitivity" android:textColor="#FFFFFF" />
         <SeekBar android:id="@+id/motionBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="80" android:progress="50" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <Button android:id="@+id/recordButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Record: Off" />
+            <Button android:id="@+id/galleryButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Gallery" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <Button android:id="@+id/redUiButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Red UI: Off" />
+            <Button android:id="@+id/strobeButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Strobe: Off" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <Button android:id="@+id/stampButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Stamp: Off" />
+            <Button android:id="@+id/splitButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Split: Off" />
+        </LinearLayout>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
             <Button android:id="@+id/stackButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Stack On" />
             <Button android:id="@+id/enhanceButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Enhance On" />
