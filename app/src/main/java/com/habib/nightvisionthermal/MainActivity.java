@@ -504,12 +504,6 @@ public class MainActivity extends AppCompatActivity {
         if (wasRecording) Toast.makeText(this, "Video saved", Toast.LENGTH_SHORT).show();
     }
 
-    @Override protected void onDestroy() {
-        if (strobeRunnable != null) handler.removeCallbacks(strobeRunnable);
-        stopRecording();
-        super.onDestroy();
-    }
-
     private void analyze(ImageProxy image) {
         try {
             if (mode == 0 || frozen) return;
@@ -827,5 +821,10 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) { return false; }
     }
 
-    @Override protected void onDestroy() { super.onDestroy(); if (executor != null) executor.shutdown(); }
+    @Override protected void onDestroy() {
+        if (strobeRunnable != null) handler.removeCallbacks(strobeRunnable);
+        stopRecording();
+        super.onDestroy();
+        if (executor != null) executor.shutdown();
+    }
 }
