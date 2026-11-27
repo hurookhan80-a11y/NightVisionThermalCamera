@@ -12,8 +12,8 @@
         <SeekBar android:id="@+id/gainBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="300" android:progress="160" />
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Contrast" android:textColor="#FFFFFF" />
         <SeekBar android:id="@+id/contrastBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="220" android:progress="125" />
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Zoom" android:textColor="#FFFFFF" />
-        <SeekBar android:id="@+id/zoomBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="30" android:progress="0" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Zoom (up to 16x)" android:textColor="#FFFFFF" />
+        <SeekBar android:id="@+id/zoomBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="150" android:progress="0" />
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
             <Button android:id="@+id/captureButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Capture" />
             <Button android:id="@+id/torchButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Torch" />
