@@ -533,7 +533,7 @@ public class MainActivity extends AppCompatActivity {
             int effH = Math.max(16, Math.round(height / crop));
             int startX = (width - effW) / 2;
             int startY = (height - effH) / 2;
-            int targetW = quality == 0 ? 240 : quality == 1 ? 320 : 360;
+            int targetW = (mode == 18 || mode == 19) ? 360 : quality == 0 ? 240 : quality == 1 ? 320 : 360;
             int step = Math.max(1, effW / targetW);
             boolean needRgb = mode == 4 || mode == 12 || mode == 13 || mode == 14 || splitOn;
             int outW = effW / step;
@@ -560,7 +560,7 @@ public class MainActivity extends AppCompatActivity {
                     } else { rr[i] = yv; gg[i] = yv; bb[i] = yv; }
                 }
             }
-            if (stackOn) applyStack(lum, rr, gg, bb, n, needRgb);
+            if (stackOn && mode != 18 && mode != 19) applyStack(lum, rr, gg, bb, n, needRgb);
             frameCount++;
             if (enhanceOn && frameCount % 6 == 0) System.arraycopy(equalizeMap(lum, n), 0, eqMap, 0, 256);
             int[] activeEq = enhanceOn ? eqMap : null;
@@ -587,7 +587,7 @@ public class MainActivity extends AppCompatActivity {
                     if (lum[i] > lum[hotIdx]) hotIdx = i;
                     if (lum[i] < lum[coldIdx]) coldIdx = i;
                     int v = activeEq != null ? activeEq[lum[i]] : lum[i];
-                    if (mode == 18 || mode == 19) v = edgeValue(lum, outW, outH, x, y);
+                    if (mode == 18 || mode == 19) { int e = edgeValue(lum, outW, outH, x, y); v = e < 22 ? 0 : clamp((e - 22) * 3); }
                     v = clamp(Math.round(((v - 128) * contrast + 128) * gain));
                     int score = -1;
                     if (mode == 12) score = heatScore(lum[i], rr[i], gg[i], bb[i]);
