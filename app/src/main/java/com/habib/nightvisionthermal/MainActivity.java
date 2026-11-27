@@ -85,6 +85,8 @@ public class MainActivity extends AppCompatActivity {
     private float[] avgB;
     private volatile float luxValue = -1f;
     private long lastStatusMs = 0;
+    private volatile float zoomRatio = 1f;
+    private volatile float maxCamZoom = 1f;
 
     private final String[] modeNames = {
             "Normal Camera", "Night Vision", "White Phosphor NVG", "Amber NVG",
@@ -114,8 +116,9 @@ public class MainActivity extends AppCompatActivity {
         });
         zoomBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                zoomRatio = 1f + progress / 10f;
                 if (camera != null) {
-                    try { camera.getCameraControl().setZoomRatio(1f + progress / 10f); } catch (Exception ignored) {}
+                    try { camera.getCameraControl().setZoomRatio(Math.min(zoomRatio, maxCamZoom)); } catch (Exception ignored) {}
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -207,7 +210,12 @@ public class MainActivity extends AppCompatActivity {
         analysis.setAnalyzer(executor, this::analyze);
         provider.unbindAll();
         camera = provider.bindToLifecycle(this, selector(), preview, analysis);
+        try {
+            if (camera.getCameraInfo().getZoomState().getValue() != null) maxCamZoom = camera.getCameraInfo().getZoomState().getValue().getMaxZoomRatio();
+            camera.getCameraControl().setZoomRatio(Math.min(zoomRatio, maxCamZoom));
+        } catch (Exception ignored) {}
         prevLum = null;
+        avgLum = null;
         updateModeUi();
         String camName = cameraMode == 2 ? "external camera" : (cameraMode == 1 ? "front camera" : "back camera");
         statusText.setText(modeNote() + " Using " + camName + (externalCameraId != null ? ". External camera detected." : ". No external thermal camera detected."));
@@ -264,19 +272,24 @@ public class MainActivity extends AppCompatActivity {
             int yRow = yPlane.getRowStride(); int yPix = yPlane.getPixelStride();
             int uRow = uPlane.getRowStride(); int uPix = uPlane.getPixelStride();
             int vRow = vPlane.getRowStride(); int vPix = vPlane.getPixelStride();
-            int step = Math.max(1, width / 360);
-            int outW = width / step;
-            int outH = height / step;
+            float crop = zoomRatio / Math.min(zoomRatio, Math.max(1f, maxCamZoom));
+            int effW = Math.max(16, Math.round(width / crop));
+            int effH = Math.max(16, Math.round(height / crop));
+            int startX = (width - effW) / 2;
+            int startY = (height - effH) / 2;
+            int step = Math.max(1, effW / 360);
+            int outW = effW / step;
+            int outH = effH / step;
             int n = outW * outH;
             int[] lum = new int[n];
             int[] rr = new int[n]; int[] gg = new int[n]; int[] bb = new int[n];
             for (int y = 0; y < outH; y++) {
-                int sy = y * step;
+                int sy = startY + y * step;
                 int yRowOff = sy * yRow;
                 int uRowOff = (sy / 2) * uRow;
                 int vRowOff = (sy / 2) * vRow;
                 for (int x = 0; x < outW; x++) {
-                    int sx = x * step;
+                    int sx = startX + x * step;
                     int i = y * outW + x;
                     int yv = sample(yBuf, yRowOff + sx * yPix);
                     int uv = sample(uBuf, uRowOff + (sx / 2) * uPix) - 128;
