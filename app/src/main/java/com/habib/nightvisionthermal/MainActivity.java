@@ -171,6 +171,12 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
+        ((Button) findViewById(R.id.settingsButton)).setOnClickListener(v -> {
+            View panel = findViewById(R.id.settingsPanel);
+            boolean show = panel.getVisibility() != View.VISIBLE;
+            panel.setVisibility(show ? View.VISIBLE : View.GONE);
+            ((Button) v).setText(show ? "Close Settings" : "Settings");
+        });
         Button capture = findViewById(R.id.captureButton);
         Button torch = findViewById(R.id.torchButton);
         Button cam = findViewById(R.id.cameraButton);
