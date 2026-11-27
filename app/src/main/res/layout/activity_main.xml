@@ -12,10 +12,21 @@
         <SeekBar android:id="@+id/gainBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="300" android:progress="160" />
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Contrast" android:textColor="#FFFFFF" />
         <SeekBar android:id="@+id/contrastBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="220" android:progress="125" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Zoom" android:textColor="#FFFFFF" />
+        <SeekBar android:id="@+id/zoomBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="30" android:progress="0" />
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
             <Button android:id="@+id/captureButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Capture" />
             <Button android:id="@+id/torchButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Torch" />
             <Button android:id="@+id/cameraButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Camera" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <Button android:id="@+id/freezeButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Freeze" />
+            <Button android:id="@+id/gridButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Grid" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <Button android:id="@+id/stackButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Stack On" />
+            <Button android:id="@+id/enhanceButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Enhance On" />
+            <Button android:id="@+id/edgesButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Edges" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>
