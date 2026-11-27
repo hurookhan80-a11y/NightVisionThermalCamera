@@ -87,6 +87,14 @@ public class MainActivity extends AppCompatActivity {
     private long lastStatusMs = 0;
     private volatile float zoomRatio = 1f;
     private volatile float maxCamZoom = 1f;
+    private volatile int quality = 0;
+    private volatile int motionThreshold = 30;
+    private volatile boolean motionPhoto = false;
+    private int[] motionHeat;
+    private long lastMotionCaptureMs = 0;
+    private long lastProcessMs = 0;
+    private final int[] eqMap = new int[256];
+    private int frameCount = 0;
 
     private final String[] modeNames = {
             "Normal Camera", "Night Vision", "White Phosphor NVG", "Amber NVG",
@@ -102,6 +110,7 @@ public class MainActivity extends AppCompatActivity {
         previewView = findViewById(R.id.previewView);
         processedView = findViewById(R.id.processedView);
         statusText = findViewById(R.id.statusText);
+        for (int i = 0; i < 256; i++) eqMap[i] = i;
         modeSpinner = findViewById(R.id.modeSpinner);
         gainBar = findViewById(R.id.gainBar);
         contrastBar = findViewById(R.id.contrastBar);
@@ -134,6 +143,20 @@ public class MainActivity extends AppCompatActivity {
         cam.setOnClickListener(v -> switchCamera());
         freeze.setOnClickListener(v -> { frozen = !frozen; freeze.setText(frozen ? "Unfreeze" : "Freeze"); });
         grid.setOnClickListener(v -> { gridOn = !gridOn; grid.setText(gridOn ? "Grid On" : "Grid"); });
+        ((Button) findViewById(R.id.qualityButton)).setOnClickListener(v -> {
+            quality = (quality + 1) % 3;
+            ((Button) v).setText(quality == 0 ? "Speed: Fast" : quality == 1 ? "Speed: Balanced" : "Speed: Quality");
+            prevLum = null; avgLum = null; motionHeat = null;
+        });
+        ((Button) findViewById(R.id.motionPhotoButton)).setOnClickListener(v -> {
+            motionPhoto = !motionPhoto;
+            ((Button) v).setText(motionPhoto ? "Motion Photo: On" : "Motion Photo: Off");
+        });
+        ((SeekBar) findViewById(R.id.motionBar)).setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) { motionThreshold = 80 - progress; }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
         Button stack = findViewById(R.id.stackButton);
         Button enhance = findViewById(R.id.enhanceButton);
         Button edges = findViewById(R.id.edgesButton);
@@ -261,6 +284,10 @@ public class MainActivity extends AppCompatActivity {
     private void analyze(ImageProxy image) {
         try {
             if (mode == 0 || frozen) return;
+            long nowMs = System.currentTimeMillis();
+            long interval = quality == 0 ? 66 : quality == 1 ? 50 : 33;
+            if (nowMs - lastProcessMs < interval) return;
+            lastProcessMs = nowMs;
             ImageProxy.PlaneProxy yPlane = image.getPlanes()[0];
             ImageProxy.PlaneProxy uPlane = image.getPlanes()[1];
             ImageProxy.PlaneProxy vPlane = image.getPlanes()[2];
@@ -277,7 +304,9 @@ public class MainActivity extends AppCompatActivity {
             int effH = Math.max(16, Math.round(height / crop));
             int startX = (width - effW) / 2;
             int startY = (height - effH) / 2;
-            int step = Math.max(1, effW / 360);
+            int targetW = quality == 0 ? 240 : quality == 1 ? 320 : 360;
+            int step = Math.max(1, effW / targetW);
+            boolean needRgb = mode == 4 || mode == 12 || mode == 13 || mode == 14;
             int outW = effW / step;
             int outH = effH / step;
             int n = outW * outH;
@@ -292,18 +321,34 @@ public class MainActivity extends AppCompatActivity {
                     int sx = startX + x * step;
                     int i = y * outW + x;
                     int yv = sample(yBuf, yRowOff + sx * yPix);
-                    int uv = sample(uBuf, uRowOff + (sx / 2) * uPix) - 128;
-                    int vv = sample(vBuf, vRowOff + (sx / 2) * vPix) - 128;
                     lum[i] = yv;
-                    rr[i] = clamp(Math.round(yv + 1.402f * vv));
-                    gg[i] = clamp(Math.round(yv - 0.344f * uv - 0.714f * vv));
-                    bb[i] = clamp(Math.round(yv + 1.772f * uv));
+                    if (needRgb) {
+                        int uv = sample(uBuf, uRowOff + (sx / 2) * uPix) - 128;
+                        int vv = sample(vBuf, vRowOff + (sx / 2) * vPix) - 128;
+                        rr[i] = clamp(Math.round(yv + 1.402f * vv));
+                        gg[i] = clamp(Math.round(yv - 0.344f * uv - 0.714f * vv));
+                        bb[i] = clamp(Math.round(yv + 1.772f * uv));
+                    } else { rr[i] = yv; gg[i] = yv; bb[i] = yv; }
                 }
             }
-            if (stackOn) applyStack(lum, rr, gg, bb, n);
-            int[] eqMap = enhanceOn ? equalizeMap(lum, n) : null;
+            if (stackOn) applyStack(lum, rr, gg, bb, n, needRgb);
+            frameCount++;
+            if (enhanceOn && frameCount % 6 == 0) System.arraycopy(equalizeMap(lum, n), 0, eqMap, 0, 256);
+            int[] activeEq = enhanceOn ? eqMap : null;
             float gain = Math.max(0.5f, gainBar.getProgress() / 100f);
             float contrast = Math.max(0.5f, contrastBar.getProgress() / 100f);
+            boolean motionAlert = false;
+            if (mode == 15) {
+                if (motionHeat == null || motionHeat.length != n) motionHeat = new int[n];
+                int cnt = 0;
+                if (prevLum != null && prevLum.length == n) {
+                    for (int i = 0; i < n; i++) {
+                        motionHeat[i] = motionHeat[i] * 4 / 5;
+                        if (Math.abs(lum[i] - prevLum[i]) > motionThreshold) { motionHeat[i] = 255; cnt++; }
+                    }
+                }
+                motionAlert = cnt > Math.max(8, n / 250);
+            }
             int[] pixels = new int[n];
             int markerIdx = -1; int markerScore = -1;
             int hotIdx = 0; int coldIdx = 0;
@@ -312,7 +357,7 @@ public class MainActivity extends AppCompatActivity {
                     int i = y * outW + x;
                     if (lum[i] > lum[hotIdx]) hotIdx = i;
                     if (lum[i] < lum[coldIdx]) coldIdx = i;
-                    int v = eqMap != null ? eqMap[lum[i]] : lum[i];
+                    int v = activeEq != null ? activeEq[lum[i]] : lum[i];
                     if (mode == 18 || mode == 19) v = edgeValue(lum, outW, outH, x, y);
                     v = clamp(Math.round(((v - 128) * contrast + 128) * gain));
                     int score = -1;
@@ -332,11 +377,10 @@ public class MainActivity extends AppCompatActivity {
             int centerVal = lum[(outH / 2) * outW + outW / 2] * 100 / 255;
             int hotVal = lum[hotIdx] * 100 / 255;
             int coldVal = lum[coldIdx] * 100 / 255;
-            long nowMs = System.currentTimeMillis();
             if (nowMs - lastStatusMs > 600) {
                 lastStatusMs = nowMs;
                 String luxText = luxValue >= 0 ? (" Light: " + Math.round(luxValue) + " lux.") : "";
-                String spotText = " Spot center " + centerVal + ", hot " + hotVal + ", cold " + coldVal + " (relative).";
+                String spotText = " Spot center " + centerVal + ", hot " + hotVal + ", cold " + coldVal + " (relative)." + (motionAlert ? " Motion detected!" : "");
                 runOnUiThread(() -> statusText.setText(modeNote() + spotText + luxText));
             }
             Bitmap bmp = Bitmap.createBitmap(pixels, outW, outH, Bitmap.Config.ARGB_8888);
@@ -350,18 +394,26 @@ public class MainActivity extends AppCompatActivity {
                 drawMarker(canvas, hotIdx % outW, hotIdx / outW, Color.RED);
                 drawMarker(canvas, coldIdx % outW, coldIdx / outW, Color.CYAN);
             }
+            if (motionAlert) {
+                Paint border = new Paint(); border.setColor(Color.RED); border.setStyle(Paint.Style.STROKE); border.setStrokeWidth(6f);
+                canvas.drawRect(3, 3, outW - 3, outH - 3, border);
+            }
             int rotation = image.getImageInfo().getRotationDegrees();
             if (rotation != 0) {
                 Matrix m = new Matrix(); m.postRotate(rotation);
                 bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
             }
             Bitmap finalBmp = bmp;
+            if (motionAlert && motionPhoto && nowMs - lastMotionCaptureMs > 3000) {
+                lastMotionCaptureMs = nowMs;
+                saveBitmap(finalBmp);
+            }
             runOnUiThread(() -> { lastBitmap = finalBmp; processedView.setImageBitmap(finalBmp); });
         } catch (Exception ignored) {
         } finally { image.close(); }
     }
 
-    private void applyStack(int[] lum, int[] rr, int[] gg, int[] bb, int n) {
+    private void applyStack(int[] lum, int[] rr, int[] gg, int[] bb, int n, boolean needRgb) {
         if (avgLum == null || avgLum.length != n) {
             avgLum = new float[n]; avgR = new float[n]; avgG = new float[n]; avgB = new float[n];
             for (int i = 0; i < n; i++) { avgLum[i] = lum[i]; avgR[i] = rr[i]; avgG[i] = gg[i]; avgB[i] = bb[i]; }
@@ -370,13 +422,15 @@ public class MainActivity extends AppCompatActivity {
         for (int i = 0; i < n; i++) {
             float alpha = Math.abs(lum[i] - avgLum[i]) > 40 ? 0.85f : 0.35f;
             avgLum[i] += (lum[i] - avgLum[i]) * alpha;
-            avgR[i] += (rr[i] - avgR[i]) * alpha;
-            avgG[i] += (gg[i] - avgG[i]) * alpha;
-            avgB[i] += (bb[i] - avgB[i]) * alpha;
             lum[i] = clamp(Math.round(avgLum[i]));
-            rr[i] = clamp(Math.round(avgR[i]));
-            gg[i] = clamp(Math.round(avgG[i]));
-            bb[i] = clamp(Math.round(avgB[i]));
+            if (needRgb) {
+                avgR[i] += (rr[i] - avgR[i]) * alpha;
+                avgG[i] += (gg[i] - avgG[i]) * alpha;
+                avgB[i] += (bb[i] - avgB[i]) * alpha;
+                rr[i] = clamp(Math.round(avgR[i]));
+                gg[i] = clamp(Math.round(avgG[i]));
+                bb[i] = clamp(Math.round(avgB[i]));
+            }
         }
     }
 
@@ -433,7 +487,10 @@ public class MainActivity extends AppCompatActivity {
             case 14: { int s = irScore(lum[i], rr[i], gg[i], bb[i]); return s > 150 ? Color.rgb(255, 240, 255) : Color.rgb((int)(s*0.7f), (int)(s*0.2f), s); }
             case 15: {
                 int base = (int)(v * 0.55f);
-                if (prevLum != null && i < prevLum.length && Math.abs(lum[i] - prevLum[i]) > 28) return Color.rgb(255, 40, 40);
+                if (motionHeat != null && i < motionHeat.length) {
+                    if (motionHeat[i] > 180) return Color.rgb(255, 40, 40);
+                    if (motionHeat[i] > 80) return Color.rgb(255, 140, 0);
+                }
                 return Color.rgb(base, base, base);
             }
             case 16: return Color.rgb(v, v, v);
