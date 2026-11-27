@@ -113,6 +113,7 @@ public class MainActivity extends AppCompatActivity {
     private final int[] eqMap = new int[256];
     private int frameCount = 0;
     private volatile boolean objectBoxOn = true;
+    private volatile float areaBrightness = 1.6f;
     private volatile boolean stampOn = false;
     private volatile boolean splitOn = false;
     private boolean redUiOn = false;
@@ -141,7 +142,7 @@ public class MainActivity extends AppCompatActivity {
             "Thermal Style: Rainbow", "Thermal Style: Lava", "Thermal Style: Arctic",
             "Medical Thermal", "Alarm Red", "Heat Finder", "Cold Finder",
             "IR Detector", "Motion Detector", "White Hot", "Black Hot", "Edge Detect", "Focus Peaking",
-            "Ultra Night Vision + Object + Edge"
+            "Ultra Night Vision + Object + Edge", "Ultra Super Night Vision + Motion"
     };
 
     @Override protected void onCreate(Bundle savedInstanceState) {
@@ -235,6 +236,11 @@ public class MainActivity extends AppCompatActivity {
         ((Button) findViewById(R.id.objectBoxButton)).setOnClickListener(v -> {
             objectBoxOn = !objectBoxOn;
             ((Button) v).setText(objectBoxOn ? "Object Box: On" : "Object Box: Off");
+        });
+        ((SeekBar) findViewById(R.id.areaBar)).setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) { areaBrightness = Math.max(0.3f, progress / 100f); }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
         Button stack = findViewById(R.id.stackButton);
         Button enhance = findViewById(R.id.enhanceButton);
@@ -568,12 +574,12 @@ public class MainActivity extends AppCompatActivity {
             }
             if (stackOn && mode != 18 && mode != 19) applyStack(lum, rr, gg, bb, n, needRgb);
             frameCount++;
-            if (enhanceOn && frameCount % 6 == 0) System.arraycopy(equalizeMap(lum, n), 0, eqMap, 0, 256);
-            int[] activeEq = enhanceOn ? eqMap : null;
+            if ((enhanceOn || mode == 21) && frameCount % 6 == 0) System.arraycopy(equalizeMap(lum, n), 0, eqMap, 0, 256);
+            int[] activeEq = (enhanceOn || mode == 21) ? eqMap : null;
             float gain = Math.max(0.5f, gainBar.getProgress() / 100f);
             float contrast = Math.max(0.5f, contrastBar.getProgress() / 100f);
             boolean motionAlert = false;
-            if (mode == 15 || mode == 20) {
+            if (mode == 15 || mode == 20 || mode == 21) {
                 if (motionHeat == null || motionHeat.length != n) motionHeat = new int[n];
                 int cnt = 0;
                 if (prevLum != null && prevLum.length == n) {
@@ -601,6 +607,7 @@ public class MainActivity extends AppCompatActivity {
                     else if (mode == 14) score = irScore(lum[i], rr[i], gg[i], bb[i]);
                     if (score > markerScore) { markerScore = score; markerIdx = i; }
                     if (mode == 20) v = clamp(Math.round(v * 1.25f));
+                    if (mode == 21) v = clamp(Math.round(255f * (float) Math.pow(v / 255f, 1f / Math.max(0.3f, areaBrightness)) * 1.15f));
                     int px = palette(v, y, i, lum, rr, gg, bb, gain, contrast);
                     if (mode == 20) {
                         int e = edgeValue(lum, outW, outH, x, y);
@@ -614,7 +621,7 @@ public class MainActivity extends AppCompatActivity {
                     pixels[i] = px;
                 }
             }
-            if (mode == 15 || mode == 20) prevLum = lum.clone();
+            if (mode == 15 || mode == 20 || mode == 21) prevLum = lum.clone();
             int centerVal = lum[(outH / 2) * outW + outW / 2] * 100 / 255;
             int hotVal = lum[hotIdx] * 100 / 255;
             int coldVal = lum[coldIdx] * 100 / 255;
@@ -750,6 +757,13 @@ public class MainActivity extends AppCompatActivity {
             }
             case 16: return Color.rgb(v, v, v);
             case 17: { int inv = 255 - v; return Color.rgb(inv, inv, inv); }
+            case 21: {
+                if (motionHeat != null && i < motionHeat.length) {
+                    if (motionHeat[i] > 180) return Color.rgb(255, 40, 40);
+                    if (motionHeat[i] > 80) return Color.rgb(255, 140, 0);
+                }
+                return Color.rgb((int)(v*0.22f), v, (int)(v*0.32f));
+            }
             case 20: return Color.rgb((int)(v*0.25f), v, (int)(v*0.35f));
             case 18: return Color.rgb(0, v, (int)(v*0.35f));
             case 19: { int base = lum[i]; return v > 60 ? Color.rgb(255, 40, 40) : Color.rgb(base, base, base); }
